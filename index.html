@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>luvurava — 3D heart in Python (Pyodide)</title>
+
+<!-- ============================================================
+     Pyodide (Python compiled to WebAssembly, runs in the browser)
+     Version pinned so the page never breaks on an unexpected update.
+     Assets verified: pyodide.js / pyodide.asm.wasm / python_stdlib.zip
+     ============================================================ -->
+<script src="https://cdn.jsdelivr.net/pyodide/v314.0.8/full/pyodide.js"></script>
+
+<style>
+  :root {
+    --bg: #0d0b14;
+    --panel: #171323;
+    --border: #2c2440;
+    --text: #e8e4f5;
+    --muted: #9a90b8;
+    --accent: #ff5c8a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px 16px 48px;
+    background: radial-gradient(circle at top, #1a1226 0%, var(--bg) 70%);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif;
+    min-height: 100vh;
+  }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  h1 { font-size: 1.4rem; margin: 0 0 4px; }
+  h1 span { color: var(--accent); }
+  .sub { color: var(--muted); font-size: .9rem; margin-bottom: 20px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 16px;
+    margin-bottom: 16px;
+  }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+  input[type="text"] {
+    background: #0f0c18;
+    border: 1px solid var(--border);
+    color: var(--text);
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-size: 14px;
+    width: 160px;
+  }
+  input[type="text"]:focus { outline: 2px solid var(--accent); border-color: transparent; }
+
+  button {
+    background: var(--accent);
+    color: #1a0a12;
+    border: 0;
+    border-radius: 8px;
+    padding: 10px 22px;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform .08s ease, opacity .15s ease;
+  }
+  button:hover:not(:disabled) { transform: translateY(-1px); }
+  button:disabled { opacity: .4; cursor: not-allowed; }
+  button.ghost { background: #2c2440; color: var(--text); }
+
+  #status {
+    font-size: 13px;
+    color: var(--muted);
+    margin-top: 10px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  #status.error { color: #ff8080; }
+  #status.ready  { color: #7ee787; }
+  .spinner {
+    width: 12px; height: 12px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    flex: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #error {
+    display: none;
+    background: #2a1216;
+    border: 1px solid #6b2b32;
+    color: #ffb3b3;
+    border-radius: 8px;
+    padding: 12px;
+    margin-top: 12px;
+    font-size: 13px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  #output {
+    margin: 0;
+    background: #07060c;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 14px;
+    overflow-x: auto;
+    font-family: "Cascadia Mono", "Consolas", "Courier New", monospace;
+    font-size: 13px;
+    line-height: 1.0;
+    letter-spacing: 0;
+    color: var(--muted);
+    min-height: 420px;
+    white-space: pre;
+    tab-size: 4;
+  }
+  footer { color: var(--muted); font-size: 12px; text-align: center; margin-top: 8px; }
+  footer code { background: #221b33; padding: 1px 5px; border-radius: 4px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1><span>&#10084;</span> luvurava — a 3D heart, written in Python</h1>
+  <p class="sub">
+    Your <code>luvurava.py</code> runs unmodified in the browser through
+    <strong>Pyodide</strong> (CPython compiled to WebAssembly). No server, no JavaScript rewrite.
+  </p>
+
+  <div class="panel">
+    <div class="controls">
+      <label for="name" style="font-size:13px;color:var(--muted)">name:</label>
+      <input type="text" id="name" value="rava" maxlength="24" autocomplete="off">
+      <button id="runBtn" disabled>&#9654; Run</button>
+      <button id="stopBtn" class="ghost" disabled>&#9632; Stop</button>
+    </div>
+    <div id="status"><span class="spinner"></span><span id="statusText">Loading Python runtime…</span></div>
+    <div id="error"></div>
+  </div>
+
+  <pre id="output">Loading Python (Pyodide)… please wait.
+
+The first visit downloads about 10 MB of WebAssembly from the CDN.</pre>
+
+  <footer>
+    Runs entirely client-side · source: <code>luvurava.py</code> ·
+    powered by <a href="https://pyodide.org" style="color:var(--accent)">Pyodide</a>
+  </footer>
+</div>
+
+<script>
+"use strict";
+
+/* ---------------------------------------------------------------
+   CONFIG — pin the exact Pyodide release you verified above.
+   --------------------------------------------------------------- */
+const PYODIDE_VERSION = "v314.0.8";
+const INDEX_URL = "https://cdn.jsdelivr.net/pyodide/" + PYODIDE_VERSION + "/full/";
+const PYTHON_FILE = "luvurava.py";
+const FRAME_MS = 50;          // ≈ time.sleep(0.05) in the original script
+
+const outputEl   = document.getElementById("output");
+const statusEl   = document.getElementById("status");
+const statusText = document.getElementById("statusText");
+const errorEl    = document.getElementById("error");
+const runBtn     = document.getElementById("runBtn");
+const stopBtn    = document.getElementById("stopBtn");
+const nameInput  = document.getElementById("name");
+
+let pyodide     = null;   // the Python interpreter
+let nextFrame   = null;   // Python: next_frame()
+let initAnimation = null; // Python: init_animation()
+let timer       = null;
+
+/* ---------------- status / error helpers ---------------- */
+function setStatus(text, kind) {
+  statusText.textContent = text;
+  statusEl.className = kind || "";
+  const spin = statusEl.querySelector(".spinner");
+  if (spin) spin.style.display = kind === "ready" || kind === "error" ? "none" : "";
+}
+
+function showError(err, where) {
+  stopAnimation();
+  errorEl.style.display = "block";
+  errorEl.textContent =
+    (where ? where + "\n" : "") + (err && err.stack ? err.stack : String(err));
+  setStatus("Something went wrong — see the details below.", "error");
+  runBtn.disabled = false;
+}
+
+function clearError() {
+  errorEl.style.display = "none";
+  errorEl.textContent = "";
+}
+
+/* ---------------- ANSI -> HTML (keeps your Python colors) ---------------- */
+const ANSI_COLORS = { "91": "#ff6b6b", "95": "#ff7ad9", "97": "#ffffff" };
+
+function ansiToHtml(text) {
+  // 1) escape HTML so Python output can never inject markup
+  const escaped = String(text)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  // 2) turn the ANSI codes your script emits into <span> colors
+  return escaped.replace(/\u001b\[(\d+)m/g, function (_m, code) {
+    if (code === "0") return "</span>";                       // RESET
+    const color = ANSI_COLORS[code];
+    return color ? '<span style="color:' + color + '">' : "";
+  });
+}
+
+/* ---------------- os / time shims (Step 3 of the plan) ----------------
+   Your script uses os.system() and time.sleep(). Neither makes sense in a
+   browser, so we replace them with browser-friendly versions BEFORE the
+   animation starts. Everything else (math, sys, the render functions) is
+   left completely untouched.
+--------------------------------------------------------------------- */
+const PYODIDE_SHIMS = `
+import os, time
+
+# os.system("cls"/"clear") -> clear the page instead of a terminal window
+def _browser_system(cmd):
+    try:
+        import js
+        js.clearScreen()
+    except Exception:
+        pass
+    return 0
+os.system = _browser_system
+
+# time.sleep() would freeze the whole tab, so refuse it with a clear message.
+# The browser drives the frames instead (see FRAME_MS in index.html).
+def _browser_sleep(seconds):
+    raise RuntimeError(
+        "time.sleep() cannot be used in the browser. "
+        "Call next_frame() on a timer instead."
+    )
+time.sleep = _browser_sleep
+`;
+
+// Called from Python (see the os.system shim above)
+window.clearScreen = function () { outputEl.innerHTML = ""; };
+
+/* ---------------- animation loop ---------------- */
+function stopAnimation() {
+  if (timer !== null) { clearInterval(timer); timer = null; }
+  stopBtn.disabled = true;
+}
+
+function startAnimation() {
+  clearError();
+  stopAnimation();
+
+  const name = (nameInput.value || "rava").trim().slice(0, 24) || "rava";
+  try {
+    initAnimation(name);      // Python: init_animation(name)
+  } catch (err) {
+    return showError(err, "Could not start the animation:");
+  }
+
+  runBtn.disabled = true;
+  stopBtn.disabled = false;
+  setStatus("Running — heart built from \"" + name + "\"", "ready");
+
+  timer = setInterval(function () {
+    try {
+      const text = nextFrame();          // Python: next_frame()
+      outputEl.innerHTML = ansiToHtml(text);
+    } catch (err) {
+      showError(err, "Animation frame failed:");
+    }
+  }, FRAME_MS);
+}
+
+/* ---------------- bootstrap ---------------- */
+async function boot() {
+  try {
+    setStatus("Loading Python runtime (Pyodide)…", "");
+    pyodide = await loadPyodide({ indexURL: INDEX_URL });
+
+    setStatus("Fetching " + PYTHON_FILE + "…", "");
+    const response = await fetch(PYTHON_FILE);
+    if (!response.ok) {
+      throw new Error(
+        "Could not load " + PYTHON_FILE + " (HTTP " + response.status + ").\n" +
+        "If you opened this file directly with file:// , serve it through\n" +
+        "GitHub Pages instead — see README.md."
+      );
+    }
+    const source = await response.text();
+
+    // Run your Python file exactly as written (it only defines functions).
+    pyodide.runPython(source);
+
+    // Apply the os/time compatibility shims.
+    pyodide.runPython(PYODIDE_SHIMS);
+
+    // Grab the two entry points your script exposes.
+    initAnimation = pyodide.globals.get("init_animation");
+    nextFrame     = pyodide.globals.get("next_frame");
+    if (typeof initAnimation !== "function" || typeof nextFrame !== "function") {
+      throw new Error(PYTHON_FILE + " did not define init_animation()/next_frame().");
+    }
+
+    runBtn.disabled = false;
+    setStatus("Ready — press Run.", "ready");
+    outputEl.textContent = "Press \u201cRun\u201d to start the animation.";
+  } catch (err) {
+    showError(err, "Failed to start:");
+  }
+}
+
+runBtn.addEventListener("click", startAnimation);
+stopBtn.addEventListener("click", function () {
+  stopAnimation();
+  setStatus("Stopped.", "");
+  runBtn.disabled = false;
+});
+nameInput.addEventListener("keydown", function (e) {
+  if (e.key === "Enter" && !runBtn.disabled) startAnimation();
+});
+
+boot();
+</script>
+</body>
+</html>
